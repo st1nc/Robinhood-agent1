@@ -142,31 +142,45 @@ listing feed  ─►  safety screen  ─►  priority queue  ─►  snipe  ─�
 (DexScreener)     (rug filters)       (by score)        (Jupiter)   (TP/SL/trail)
 ```
 
-### Safety screen (0–6 score)
+### Safety screen (0–8 score)
 
-Every candidate must clear hard gates **and** reach `MIN_SAFETY_SCORE`:
+The screen is deliberately strict: the goal is to **only enter genuine launches
+and skip the overwhelming majority that are scams**. Every candidate must clear
+*every* hard gate **and** reach `MIN_SAFETY_SCORE` (default 6).
 
 | Check | Type |
 |---|---|
-| Pool age ≤ `MAX_POOL_AGE_MINUTES` | hard gate |
+| Pool age within `MIN_POOL_AGE_SECONDS … MAX_POOL_AGE_MINUTES` | hard gate |
+| Not already +`MAX_PRICE_CHANGE_5M_PCT`% in 5 min (no chasing tops) | hard gate |
 | Liquidity ≥ `MIN_LIQUIDITY_USD` | hard gate + 1 pt |
+| Liquidity / FDV ≥ `MIN_LIQUIDITY_FDV_RATIO` (no thin-pool/huge-cap) | gate² + 1 pt |
 | 5-minute volume ≥ `MIN_VOLUME_5M_USD` | +1 pt |
+| Buy ratio ≥ `MIN_BUY_RATIO` (not being dumped) | gate² + 1 pt |
 | Mint authority renounced (no infinite-mint rug) | gate¹ + 1 pt |
 | Freeze authority renounced (tokens can't be frozen) | gate¹ + 1 pt |
-| Top holder ≤ `MAX_TOP_HOLDER_PCT` | +1 pt |
+| Top **non-pool** holder ≤ `MAX_TOP_HOLDER_PCT` | gate³ + 1 pt |
 | Round-trip loss ≤ `MAX_ROUNDTRIP_LOSS_PCT` (sellable, low tax) | hard gate + 1 pt |
 
 ¹ enforced when `REQUIRE_MINT_RENOUNCED` / `REQUIRE_FREEZE_RENOUNCED` are true.
+² enforced once the data is available (FDV known / ≥ 5 trades in the window).
+³ enforced when the on-chain holder lookup succeeds.
 
-The round-trip check requests a buy quote then an immediate sell quote from
-Jupiter — no route back is a classic honeypot signature and is rejected.
+The round-trip check buys then immediately sell-quotes the *real* trade size via
+Jupiter — no route back is a classic honeypot signature and is rejected. The
+top-holder check excludes the AMM pool vault so it flags real whale/dev wallets,
+not normal pooled liquidity. The minimum pool age lets a launch settle for a few
+seconds so these reads reflect reality instead of block-zero noise.
 
-### Exit rules
+### Exit rules — fast in, fast out
 
-- **Profit target**: +50 % (`PROFIT_TARGET_PCT`)
-- **Trailing stop**: give back 20 % off the peak (`TRAILING_STOP_PCT`)
-- **Hard stop**: -25 % (`STOP_LOSS_PCT`)
-- **Max hold**: 60 min (`MAX_HOLD_MINUTES`)
+- **Rug guard (highest priority)**: bail immediately if pool liquidity drops
+  `LIQUIDITY_RUG_EXIT_PCT` (35 %) below entry — liquidity is being pulled
+- **Profit target**: +35 % (`PROFIT_TARGET_PCT`)
+- **Trailing stop**: give back 15 % off the peak (`TRAILING_STOP_PCT`)
+- **Hard stop**: -18 % (`STOP_LOSS_PCT`)
+- **Max hold**: 20 min (`MAX_HOLD_MINUTES`)
+
+Positions are re-checked every `MONITOR_INTERVAL_SECONDS` (3 s).
 
 ## Quick start
 
@@ -178,9 +192,13 @@ python solana_main.py                   # paper mode (safe default)
 PAPER_TRADING=false python solana_main.py   # live — funds a real wallet
 ```
 
-Paper mode needs no wallet — it uses live public market data for screening and
-simulates fills with slippage. A dedicated RPC (Helius / QuickNode / Triton) is
-strongly recommended; the public node is heavily rate-limited.
+Paper mode needs no wallet — it screens with live market data plus a read-only
+RPC (for mint/freeze authority and holder checks) and simulates fills with
+slippage. Because those on-chain checks are required to confirm a token isn't a
+scam, the screen won't reach `MIN_SAFETY_SCORE` if the RPC is unreachable, so it
+simply won't trade — `solana`/`solders` installed and a working `SOLANA_RPC_URL`
+are needed even for realistic paper runs. A dedicated RPC (Helius / QuickNode /
+Triton) is strongly recommended; the public node is heavily rate-limited.
 
 ## Architecture
 

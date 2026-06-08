@@ -60,16 +60,17 @@ class SolanaClient:
             return False
         try:
             from solders.keypair import Keypair          # type: ignore
-            from solana.rpc.api import Client             # type: ignore
 
             self._keypair = Keypair.from_base58_string(config.WALLET_PRIVATE_KEY)
-            self._rpc = Client(config.SOLANA_RPC_URL)
+            if self._ensure_rpc() is None:
+                log.error("solana not installed — run: pip install solana solders")
+                return False
             pubkey = str(self._keypair.pubkey())
             bal = self.get_portfolio_equity()
             log.info("Wallet loaded: %s  (%.4f SOL)", pubkey, bal)
             return True
         except ImportError:
-            log.error("solana / solders not installed — run: pip install solana solders")
+            log.error("solders not installed — run: pip install solana solders")
             return False
         except Exception as exc:                          # noqa: BLE001
             log.error("Wallet login failed: %s", exc)
@@ -78,6 +79,22 @@ class SolanaClient:
     def logout(self) -> None:
         self._keypair = None
         self._rpc = None
+
+    def _ensure_rpc(self):
+        """Lazily build a read-only RPC client (no wallet required).
+
+        Screening (mint authority, holder concentration) works in paper mode
+        this way, as long as ``solana`` is installed and the RPC is reachable.
+        """
+        if self._rpc is not None:
+            return self._rpc
+        try:
+            from solana.rpc.api import Client             # type: ignore
+            self._rpc = Client(config.SOLANA_RPC_URL)
+        except Exception as exc:                          # noqa: BLE001
+            log.debug("RPC unavailable: %s", exc)
+            return None
+        return self._rpc
 
     @property
     def pubkey(self) -> Optional[str]:
@@ -121,12 +138,18 @@ class SolanaClient:
         best = max(candidates, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0)
         liq = (best.get("liquidity") or {}).get("usd") or 0.0
         vol5 = (best.get("volume") or {}).get("m5") or 0.0
+        tx5 = (best.get("txns") or {}).get("m5") or {}
         base = best.get("baseToken") or {}
         return {
             "price_usd":      float(best.get("priceUsd") or 0) or None,
             "price_native":   float(best.get("priceNative") or 0) or None,
             "liquidity_usd":  float(liq),
             "volume_5m_usd":  float(vol5),
+            "fdv":            float(best.get("fdv") or 0),
+            "market_cap":     float(best.get("marketCap") or 0),
+            "buys_5m":        int(tx5.get("buys") or 0),
+            "sells_5m":       int(tx5.get("sells") or 0),
+            "price_change_5m": float((best.get("priceChange") or {}).get("m5") or 0),
             "pair_created_ms": int(best.get("pairCreatedAt") or 0),
             "dex_id":         best.get("dexId", "?"),
             "pair_address":   best.get("pairAddress", ""),
@@ -149,12 +172,13 @@ class SolanaClient:
         ``*_renounced`` is True when the corresponding authority is null.
         Returns an empty dict if the lookup fails (treated as "unknown").
         """
-        if not self._rpc:
+        rpc = self._ensure_rpc()
+        if not rpc:
             return {}
         try:
             from solders.pubkey import Pubkey            # type: ignore
             resp = _retry(
-                self._rpc.get_account_info_json_parsed,
+                rpc.get_account_info_json_parsed,
                 Pubkey.from_string(mint),
             )
             info = resp.value.data.parsed["info"]        # type: ignore[union-attr]
@@ -171,19 +195,31 @@ class SolanaClient:
             return {}
 
     def get_top_holder_pct(self, mint: str) -> Optional[float]:
-        """Largest token-account share of supply, as a percent (0–100)."""
-        if not self._rpc:
+        """Largest *non-pool* holder's share of supply, as a percent (0–100).
+
+        The single biggest token account on a fresh launch is virtually always
+        the AMM pool vault, which legitimately holds most of the supply, so it
+        is excluded. What remains is the largest dev/whale wallet — the real
+        dump risk.
+        """
+        rpc = self._ensure_rpc()
+        if not rpc:
             return None
         try:
             from solders.pubkey import Pubkey            # type: ignore
-            largest = _retry(self._rpc.get_token_largest_accounts,
+            largest = _retry(rpc.get_token_largest_accounts,
                              Pubkey.from_string(mint))
-            supply = _retry(self._rpc.get_token_supply, Pubkey.from_string(mint))
+            supply = _retry(rpc.get_token_supply, Pubkey.from_string(mint))
             total = float(supply.value.amount)            # type: ignore[union-attr]
-            top = max(float(a.amount) for a in largest.value)  # type: ignore[union-attr]
-            if total <= 0:
+            amounts = sorted(
+                (float(a.amount) for a in largest.value),  # type: ignore[union-attr]
+                reverse=True,
+            )
+            if total <= 0 or not amounts:
                 return None
-            return top / total * 100.0
+            # Drop index 0 (pool vault); the next entry is the top real holder.
+            non_pool = amounts[1] if len(amounts) > 1 else 0.0
+            return non_pool / total * 100.0
         except Exception as exc:                          # noqa: BLE001
             log.debug("top-holder lookup failed for %s: %s", mint, exc)
             return None

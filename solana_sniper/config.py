@@ -40,22 +40,46 @@ PRIORITY_FEE_LAMPORTS = int(os.getenv("PRIORITY_FEE_LAMPORTS", "200000"))
 # ── Scanning ──────────────────────────────────────────────────────────────────
 SCAN_INTERVAL_SECONDS = int(os.getenv("SCAN_INTERVAL_SECONDS", "15"))
 
-# Only snipe pairs created within this window (the "fresh launch" zone).
-MAX_POOL_AGE_MINUTES  = float(os.getenv("MAX_POOL_AGE_MINUTES", "30"))
+# Snipe pairs inside this freshness window. The lower floor lets a launch settle
+# for a few seconds (initial bundle snipers clear, real liquidity and holders
+# appear) so the safety screen reads accurate data instead of block-zero noise.
+MIN_POOL_AGE_SECONDS  = float(os.getenv("MIN_POOL_AGE_SECONDS", "30"))
+MAX_POOL_AGE_MINUTES  = float(os.getenv("MAX_POOL_AGE_MINUTES", "15"))
 
 # ── Safety Filters (rug / honeypot protection) ────────────────────────────────
-# A candidate must clear these gates AND reach MIN_SAFETY_SCORE to qualify.
-MIN_LIQUIDITY_USD     = float(os.getenv("MIN_LIQUIDITY_USD", "5000"))
-MIN_VOLUME_5M_USD     = float(os.getenv("MIN_VOLUME_5M_USD", "1000"))
-MAX_TOP_HOLDER_PCT    = float(os.getenv("MAX_TOP_HOLDER_PCT", "25"))   # largest non-pool holder
+# A candidate must clear EVERY hard gate AND reach MIN_SAFETY_SCORE to qualify.
+# Defaults are deliberately strict — the goal is to only touch tokens that look
+# like genuine launches, and skip the overwhelming majority that are scams.
+MIN_LIQUIDITY_USD     = float(os.getenv("MIN_LIQUIDITY_USD", "10000"))
+MIN_VOLUME_5M_USD     = float(os.getenv("MIN_VOLUME_5M_USD", "2000"))
+
+# Largest *non-pool* holder cap. The AMM pool vault is excluded; what's left is
+# the biggest dev/whale wallet that could dump on you.
+MAX_TOP_HOLDER_PCT    = float(os.getenv("MAX_TOP_HOLDER_PCT", "10"))
+
+# Renounced authorities are required by default: an active mint authority can
+# print unlimited supply, an active freeze authority can lock your tokens.
 REQUIRE_MINT_RENOUNCED   = os.getenv("REQUIRE_MINT_RENOUNCED",   "true").lower() == "true"
 REQUIRE_FREEZE_RENOUNCED = os.getenv("REQUIRE_FREEZE_RENOUNCED", "true").lower() == "true"
-# Reject if a single round-trip (buy then immediate sell quote) loses more than
-# this fraction to tax/slippage — a crude honeypot / high-tax detector.
-MAX_ROUNDTRIP_LOSS_PCT   = float(os.getenv("MAX_ROUNDTRIP_LOSS_PCT", "0.15"))
 
-# Minimum composite safety score (0–6) required to fire.
-MIN_SAFETY_SCORE = int(os.getenv("MIN_SAFETY_SCORE", "4"))
+# Honeypot / high-tax guard: buy then immediately sell-quote TRADE_SIZE_SOL via
+# Jupiter; reject if too much value is lost — or if there's no sell route at all.
+MAX_ROUNDTRIP_LOSS_PCT   = float(os.getenv("MAX_ROUNDTRIP_LOSS_PCT", "0.12"))
+
+# Healthy two-sided flow: fraction of the last 5 minutes' trades that are buys
+# must be at least this. A sell-dominated pool is already being dumped.
+MIN_BUY_RATIO            = float(os.getenv("MIN_BUY_RATIO", "0.45"))
+
+# Liquidity must be a meaningful fraction of fully-diluted value, otherwise a
+# tiny pool is propping up a huge nominal market cap (classic exit-scam setup).
+MIN_LIQUIDITY_FDV_RATIO  = float(os.getenv("MIN_LIQUIDITY_FDV_RATIO", "0.03"))
+
+# Don't chase a launch that has already gone vertical in the last 5 minutes —
+# we want a clean early entry, not the top of someone else's pump.
+MAX_PRICE_CHANGE_5M_PCT  = float(os.getenv("MAX_PRICE_CHANGE_5M_PCT", "120"))
+
+# Minimum composite safety score (0–8) required to fire.
+MIN_SAFETY_SCORE = int(os.getenv("MIN_SAFETY_SCORE", "6"))
 
 # ── Trade Sizing (denominated in SOL) ─────────────────────────────────────────
 TRADE_SIZE_SOL = float(os.getenv("TRADE_SIZE_SOL", "0.25"))
@@ -63,10 +87,17 @@ MIN_TRADE_SOL  = float(os.getenv("MIN_TRADE_SOL",  "0.05"))
 MAX_TRADE_SOL  = float(os.getenv("MAX_TRADE_SOL",  "1.0"))
 
 # ── Exit Parameters ───────────────────────────────────────────────────────────
-PROFIT_TARGET_PCT  = float(os.getenv("PROFIT_TARGET_PCT",  "0.50"))   # +50 %
-STOP_LOSS_PCT      = float(os.getenv("STOP_LOSS_PCT",      "0.25"))   # -25 %
-TRAILING_STOP_PCT  = float(os.getenv("TRAILING_STOP_PCT",  "0.20"))   # give back 20 % off peak
-MAX_HOLD_MINUTES   = float(os.getenv("MAX_HOLD_MINUTES",   "60"))
+# Fast in / fast out — lock gains early and cut losers quickly rather than
+# riding a fresh launch's round-trip back to zero.
+PROFIT_TARGET_PCT  = float(os.getenv("PROFIT_TARGET_PCT",  "0.35"))   # +35 %
+STOP_LOSS_PCT      = float(os.getenv("STOP_LOSS_PCT",      "0.18"))   # -18 %
+TRAILING_STOP_PCT  = float(os.getenv("TRAILING_STOP_PCT",  "0.15"))   # give back 15 % off peak
+MAX_HOLD_MINUTES   = float(os.getenv("MAX_HOLD_MINUTES",   "20"))
+MONITOR_INTERVAL_SECONDS = float(os.getenv("MONITOR_INTERVAL_SECONDS", "3"))
+
+# Emergency rug exit: dump immediately if pool liquidity drops this fraction
+# below the level we entered at — liquidity is being pulled.
+LIQUIDITY_RUG_EXIT_PCT = float(os.getenv("LIQUIDITY_RUG_EXIT_PCT", "0.35"))
 
 # ── Risk Controls ─────────────────────────────────────────────────────────────
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "5"))

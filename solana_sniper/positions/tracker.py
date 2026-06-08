@@ -29,6 +29,7 @@ class OpenTrade:
     stop_price:    float          # absolute price (SOL)
     max_hold_ts:   float          # unix ts to force-close
     peak_price:    float          # highest seen price (for trailing stop)
+    entry_liquidity_usd: float    # pool liquidity at entry (for rug detection)
     order_id:      str = ""
     entry_ts:      float = field(default_factory=time.time)
 
@@ -56,6 +57,7 @@ class PositionTracker:
                 stop_price    REAL,
                 max_hold_ts   REAL,
                 peak_price    REAL,
+                entry_liquidity_usd REAL,
                 order_id      TEXT,
                 entry_ts      REAL
             )
@@ -91,12 +93,12 @@ class PositionTracker:
         with self._lock:
             self._memory[trade.mint] = trade
             self._conn.execute(
-                "INSERT OR REPLACE INTO open_trades VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO open_trades VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     trade.mint, trade.symbol, trade.entry_price, trade.quantity,
                     trade.sol_in, trade.profit_target, trade.stop_price,
-                    trade.max_hold_ts, trade.peak_price, trade.order_id,
-                    trade.entry_ts,
+                    trade.max_hold_ts, trade.peak_price, trade.entry_liquidity_usd,
+                    trade.order_id, trade.entry_ts,
                 ),
             )
             self._conn.commit()

@@ -17,8 +17,6 @@ from solana_sniper.risk.manager import Decision, RiskManager
 
 log = logging.getLogger(__name__)
 
-MONITOR_INTERVAL = 5   # seconds between exit checks
-
 
 class TradeExecutor:
 
@@ -71,6 +69,7 @@ class TradeExecutor:
             stop_price=stop_price,
             max_hold_ts=max_hold_ts,
             peak_price=entry_price,
+            entry_liquidity_usd=cand.liquidity_usd,
             order_id=order_id,
         )
         self._tracker.add(trade)
@@ -96,12 +95,14 @@ class TradeExecutor:
                         log.error("Exit check error for %s: %s", trade.symbol, exc)
             except Exception as exc:                       # noqa: BLE001
                 log.error("Monitor error: %s", exc, exc_info=True)
-            time.sleep(MONITOR_INTERVAL)
+            time.sleep(config.MONITOR_INTERVAL_SECONDS)
 
     def _check_exit(self, trade: OpenTrade) -> None:
-        price = self._broker.get_price_sol(trade.mint)
+        market = self._broker.get_token_market(trade.mint)
+        price = (market or {}).get("price_native")
         if not price or price <= 0:
             return
+        liquidity = (market or {}).get("liquidity_usd", 0.0)
 
         # Track peak for the trailing stop.
         if price > trade.peak_price:
@@ -109,9 +110,14 @@ class TradeExecutor:
             self._tracker.update_peak(trade.mint, price)
 
         trailing_stop = trade.peak_price * (1 - config.TRAILING_STOP_PCT)
+        rug_floor = trade.entry_liquidity_usd * (1 - config.LIQUIDITY_RUG_EXIT_PCT)
         reason: str | None = None
 
-        if price >= trade.profit_target:
+        # Rug pull takes priority — get out the instant liquidity is yanked.
+        if trade.entry_liquidity_usd > 0 and liquidity < rug_floor:
+            reason = (f"liquidity_rug (entry=${trade.entry_liquidity_usd:,.0f} "
+                      f"now=${liquidity:,.0f})")
+        elif price >= trade.profit_target:
             reason = f"profit_target ({price:.8f} >= {trade.profit_target:.8f})"
         elif price <= trade.stop_price:
             reason = f"stop_loss ({price:.8f} <= {trade.stop_price:.8f})"
