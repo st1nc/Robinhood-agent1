@@ -18,5 +18,14 @@
 1 Failed download:
 2026-06-08 13:36:33,612  ERROR     yfinance                        ['UNI-USD']: possibly delisted; no price data found  (period=1d)
 2026-06-08 13:36:40,907  INFO      robinhood_sniper.scanner.opportunity  [SCAN] session=PREMARKET     scanned=41  opportunities=0
-36:33,612  ERROR     yfinance                        ['UNI-USD']: possibly delisted; no price data found  (period=1d)
-2026-06-08 13:36:40,907  INFO      robinhood_sniper.scanner.opportunity  [SCAN] session=PREMARKET     scanned=41  opportunities=0
+2026-06-08 13:37:01,774  ERROR     yfinance                        $MATIC-USD: possibly delisted; no price data found  (period=1d)
+2026-06-08 13:37:01,775  ERROR     yfinance                        
+1 Failed download:
+2026-06-08 13:37:01,775  ERROR     yfinance                        ['MATIC-USD']: possibly delisted; no price data found  (period=1d)
+2026-06-08 13:37:02,192  ERROR     yfinance                        $UNI-USD: possibly delisted; no price data found  (period=1d)
+2026-06-08 13:37:02,194  ERROR     yfinance                        
+1 Failed download:
+2026-06-08 13:37:02,194  ERROR     yfinance                        ['UNI-USD']: possibly delisted; no price data found  (period=1d)
+2026-06-08 13:37:07,139  INFO      robinhood_sniper.scanner.opportunity  [SCAN] session=PREMARKET     scanned=41  opportunities=0
+37:02,194  ERROR     yfinance                        ['UNI-USD']: possibly delisted; no price data found  (period=1d)
+2026-06-08 13:37:07,139  INFO      robinhood_sniper.scanner.opportunity  [SCAN] session=PREMARKET     scanned=41  opportunities=0
