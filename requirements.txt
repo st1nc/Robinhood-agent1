@@ -6,3 +6,8 @@ pytz>=2023.3
 python-dotenv>=1.0.0
 pyotp>=2.9.0
 schedule>=1.2.0
+
+# ── Solana sniper ─────────────────────────────────────────────────────────────
+requests>=2.31.0
+solana>=0.34.0        # live on-chain execution only (paper mode works without)
+solders>=0.21.0       # keypair + transaction signing

@@ -1,0 +1,11 @@
+# Secrets
+.env
+
+# Runtime artifacts
+*.log
+*.db
+rh_session*
+__pycache__/
+*.py[cod]
+.venv/
+venv/
