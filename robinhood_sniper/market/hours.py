@@ -25,7 +25,8 @@ def _hhmm(dt: datetime.datetime, time_str: str) -> datetime.datetime:
     """Return a timezone-aware datetime for today at HH:MM ET."""
     tz = pytz.timezone(config.TIMEZONE)
     h, m = map(int, time_str.split(":"))
-    return dt.replace(hour=h, minute=m, second=0, microsecond=0, tzinfo=tz)
+    naive = dt.replace(hour=h, minute=m, second=0, microsecond=0, tzinfo=None)
+    return tz.localize(naive)
 
 
 def current_session() -> Session:
