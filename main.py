@@ -47,6 +47,7 @@ _setup_logging()
 log = logging.getLogger("main")
 
 from robinhood_sniper import config
+from robinhood_sniper.broker.mcp_client import MCPBroker
 from robinhood_sniper.broker.robinhood_client import RobinhoodClient
 from robinhood_sniper.execution.trader import TradeExecutor
 from robinhood_sniper.paper.simulator import PaperBroker
@@ -84,15 +85,21 @@ def main() -> None:
              config.CRYPTO_MAX_HOLD_MINUTES)
     log.info("═" * 60)
 
-    # ── Broker ────────────────────────────────────────────────────────────────
-    live_client = RobinhoodClient()
-    logged_in   = live_client.login()
-
-    if not logged_in:
-        if not config.PAPER_TRADING:
-            log.error("Live login failed. Set PAPER_TRADING=true or fix credentials.")
-            sys.exit(1)
-        log.warning("Login failed but PAPER_TRADING=true — continuing in paper mode")
+    # ── Broker selection ──────────────────────────────────────────────────────
+    # Priority: official MCP API (token present) > robin_stocks > paper
+    if config.MCP_BEARER_TOKEN and not config.PAPER_TRADING:
+        live_client = MCPBroker()
+        logged_in   = True
+        log.info("Broker: Official Robinhood MCP API  account=••••%s",
+                 config.AGENTIC_ACCOUNT[-4:])
+    else:
+        live_client = RobinhoodClient()
+        logged_in   = live_client.login()
+        if not logged_in:
+            if not config.PAPER_TRADING:
+                log.error("Live login failed. Set PAPER_TRADING=true or fix credentials.")
+                sys.exit(1)
+            log.warning("Login failed but PAPER_TRADING=true — continuing in paper mode")
 
     broker = PaperBroker(live_client) if config.PAPER_TRADING else live_client
 

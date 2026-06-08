@@ -3,7 +3,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Credentials ───────────────────────────────────────────────────────────────
+# ── Official MCP API (primary) ────────────────────────────────────────────────
+MCP_SERVER_URL      = os.getenv("MCP_SERVER_URL", "https://agent.robinhood.com/mcp/trading")
+MCP_BEARER_TOKEN    = os.getenv("MCP_BEARER_TOKEN", "")
+AGENTIC_ACCOUNT     = os.getenv("AGENTIC_ACCOUNT", "690935523")  # agentic_allowed account
+
+# ── robin_stocks fallback credentials ────────────────────────────────────────
 ROBINHOOD_USERNAME  = os.getenv("ROBINHOOD_USERNAME", "")
 ROBINHOOD_PASSWORD  = os.getenv("ROBINHOOD_PASSWORD", "")
 ROBINHOOD_MFA_SECRET = os.getenv("ROBINHOOD_MFA_SECRET", "")
