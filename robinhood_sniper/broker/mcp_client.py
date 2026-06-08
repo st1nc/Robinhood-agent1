@@ -51,20 +51,37 @@ def _call(tool: str, arguments: dict) -> Optional[dict]:
                 json=payload,
                 headers=headers,
                 timeout=15,
+                stream=True,
             )
             resp.raise_for_status()
-            body = resp.json()
+
+            # Server responds with text/event-stream — parse SSE data lines
+            import json as _json
+            body_str = ""
+            ct = resp.headers.get("content-type", "")
+            if "event-stream" in ct:
+                for raw in resp.iter_lines():
+                    line = raw.decode() if isinstance(raw, bytes) else raw
+                    if line.startswith("data:"):
+                        body_str = line[5:].strip()
+                        break   # single-message tools send one data event
+            else:
+                body_str = resp.text
+
+            if not body_str:
+                log.warning("Empty MCP response for %s", tool)
+                continue
+
+            body = _json.loads(body_str)
             if "error" in body:
                 log.error("MCP error from %s: %s", tool, body["error"])
                 return None
             result = body.get("result", {})
-            # Unwrap MCP content envelope
             contents = result.get("content", [])
             for item in contents:
                 if item.get("type") == "text":
-                    import json
                     try:
-                        return json.loads(item["text"])
+                        return _json.loads(item["text"])
                     except Exception:
                         return {"raw": item["text"]}
             return result
@@ -161,24 +178,38 @@ class MCPBroker:
             log.warning("Cannot buy %s: no valid quote", symbol)
             return None
 
-        quantity = round(dollars / price, 6)
-        limit_price = str(round(price * 1.002, 2))   # 0.2 % above ask
-
-        # Determine session
         from robinhood_sniper.market.hours import extended_hours_active
-        market_hours = "extended_hours" if extended_hours_active() else "regular_hours"
+        in_extended = extended_hours_active()
 
-        result = _call("place_equity_order", {
-            "account_number": self._account,
-            "symbol":         symbol,
-            "side":           "buy",
-            "type":           "limit",
-            "quantity":       str(quantity),
-            "limit_price":    limit_price,
-            "time_in_force":  "gfd",
-            "market_hours":   market_hours,
-            "ref_id":         str(uuid.uuid4()),
-        })
+        if in_extended:
+            # Extended hours: limit orders only, no fractional
+            quantity    = round(dollars / price, 6)
+            limit_price = str(round(price * 1.002, 2))
+            order_args  = {
+                "account_number": self._account,
+                "symbol":         symbol,
+                "side":           "buy",
+                "type":           "limit",
+                "quantity":       str(quantity),
+                "limit_price":    limit_price,
+                "time_in_force":  "gfd",
+                "market_hours":   "extended_hours",
+                "ref_id":         str(uuid.uuid4()),
+            }
+        else:
+            # Regular hours: dollar-amount market order → fractional shares supported
+            order_args = {
+                "account_number": self._account,
+                "symbol":         symbol,
+                "side":           "buy",
+                "type":           "market",
+                "dollar_amount":  str(round(dollars, 2)),
+                "time_in_force":  "gfd",
+                "market_hours":   "regular_hours",
+                "ref_id":         str(uuid.uuid4()),
+            }
+
+        result = _call("place_equity_order", order_args)
 
         if result:
             order_id = result.get("data", {}).get("id", "unknown")

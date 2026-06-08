@@ -104,7 +104,37 @@ class OpportunityScanner:
     def _analyze_symbol(self, symbol: str, asset_type: str):
         try:
             bars = self._broker.get_historicals(symbol, asset_type)
+            # MCPBroker returns [] — fall back to robin_stocks for OHLCV
+            if not bars:
+                bars = self._rh_historicals(symbol, asset_type)
             return sig.analyze(symbol, asset_type, bars)
         except Exception as exc:
             log.debug("Analysis failed for %s: %s", symbol, exc)
             return None
+
+    def _rh_historicals(self, symbol: str, asset_type: str) -> list[dict]:
+        """Fetch OHLCV bars via yfinance (no auth required)."""
+        try:
+            import yfinance as yf
+            # Crypto tickers need -USD suffix on yfinance
+            ticker = f"{symbol}-USD" if asset_type == "crypto" else symbol
+            df = yf.download(ticker, period="1d", interval="5m",
+                             progress=False, auto_adjust=True)
+            if df is None or df.empty:
+                return []
+            # Flatten multi-level columns if present
+            if hasattr(df.columns, "levels"):
+                df.columns = df.columns.get_level_values(0)
+            rows = []
+            for _, row in df.iterrows():
+                rows.append({
+                    "open_price":   str(row.get("Open",   0)),
+                    "high_price":   str(row.get("High",   0)),
+                    "low_price":    str(row.get("Low",    0)),
+                    "close_price":  str(row.get("Close",  0)),
+                    "volume":       str(row.get("Volume", 0)),
+                })
+            return rows
+        except Exception as exc:
+            log.debug("yfinance historicals failed for %s: %s", symbol, exc)
+            return []

@@ -1,8 +1,8 @@
-robin_stocks>=3.0.0
+yfinance>=0.2.0
 pandas>=2.0.0
-pandas-ta>=0.3.14b
+finta>=1.3
 numpy>=1.24.0
 pytz>=2023.3
 python-dotenv>=1.0.0
 pyotp>=2.9.0
-schedule>=1.2.0
+requests>=2.31.0

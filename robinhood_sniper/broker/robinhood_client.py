@@ -10,9 +10,10 @@ import logging
 import time
 from typing import Optional
 
-import robin_stocks.robinhood as rh
-
 from robinhood_sniper import config
+
+rh = None
+_RH_AVAILABLE = False
 
 log = logging.getLogger(__name__)
 
@@ -35,9 +36,12 @@ def _retry(fn, *args, **kwargs):
 
 
 class RobinhoodClient:
-    """Live Robinhood broker client."""
+    """Live Robinhood broker client (robin_stocks based)."""
 
     def login(self) -> bool:
+        if not _RH_AVAILABLE:
+            log.error("robin_stocks not available in this environment")
+            return False
         if not config.ROBINHOOD_USERNAME or not config.ROBINHOOD_PASSWORD:
             log.error("ROBINHOOD_USERNAME / ROBINHOOD_PASSWORD not set in .env")
             return False

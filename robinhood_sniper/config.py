@@ -63,9 +63,9 @@ VOLUME_AVG_PERIODS      = 20
 MIN_SIGNAL_SCORE = 3
 
 # ── Trade Sizing ──────────────────────────────────────────────────────────────
-POSITION_SIZE_PCT  = 0.10        # 10 % of available buying power per trade
-MIN_TRADE_DOLLARS  = 10.0
-MAX_TRADE_DOLLARS  = 5_000.0
+POSITION_SIZE_PCT  = float(os.getenv("POSITION_SIZE_PCT", "0.90"))  # 90 % per trade
+MIN_TRADE_DOLLARS  = float(os.getenv("MIN_TRADE_DOLLARS", "1.0"))
+MAX_TRADE_DOLLARS  = float(os.getenv("MAX_TRADE_DOLLARS", "5000.0"))
 
 # ── Exit Parameters — Stocks ─────────────────────────────────────────────────
 PROFIT_TARGET_PCT = 0.020        # +2 %
