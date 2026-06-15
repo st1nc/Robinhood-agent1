@@ -35,8 +35,16 @@ import uuid
 import pytz
 import requests
 
+# Token is resolved once at startup via token_manager (auto-refreshes if needed).
+sys.path.insert(0, os.path.dirname(__file__))
+try:
+    from token_manager import get_token
+except ImportError:
+    def get_token():
+        return os.environ.get("MCP_BEARER_TOKEN", "")
+
 # ── Config (all from env) ──────────────────────────────────────────────
-TOKEN        = os.environ.get("MCP_BEARER_TOKEN", "")
+TOKEN        = get_token()
 ACCOUNT      = os.environ.get("AGENTIC_ACCOUNT", "")
 SYMBOL       = os.environ.get("SNIPER_SYMBOL", "").upper().strip()
 CAPITAL      = float(os.environ.get("SNIPER_CAPITAL", "5.00"))

@@ -1,23 +1,30 @@
 name: Robinhood Sniper
 
-# Stateless cron trader. Each run reads live account state, makes one
-# decision, and exits. See cron_trader.py for the strategy.
+# Stateless cron trader. Each run:
+#   1. Refreshes the Robinhood bearer token using the stored refresh token
+#   2. Updates MCP_BEARER_TOKEN + MCP_REFRESH_TOKEN secrets automatically
+#   3. Reads live account state, makes one trade decision, and exits.
 #
-# Cron is in UTC. The window below (13:00-21:00 UTC, Mon-Fri) covers US
-# market hours under both EDT (13:30-20:00) and EST (14:30-21:00); the
-# script itself gates on the real Eastern-time session, so off-hours runs
-# are cheap no-ops.
+# Cron is UTC. Window below (13:00-20:00 UTC Mon-Fri) covers US market hours
+# under both EDT and EST. Off-hours runs are cheap no-ops (script self-gates).
 #
-# NOTE: GitHub-hosted scheduled workflows fire on a best-effort basis and
-# can be delayed several minutes under load. For tighter timing, move to a
-# VPS + systemd timer running the same cron_trader.py.
+# Required secrets:
+#   MCP_BEARER_TOKEN   — initial Robinhood access token (auto-rotated after first run)
+#   MCP_REFRESH_TOKEN  — Robinhood refresh token (auto-rotated after each refresh)
+#   AGENTIC_ACCOUNT    — Robinhood account number
+#   GH_PAT             — GitHub Personal Access Token with repo secrets:write scope
+#                        (needed to auto-rotate secrets; create at github.com/settings/tokens)
+#
+# Optional variables (Settings → Variables):
+#   SNIPER_SYMBOL, SNIPER_CAPITAL, SNIPER_TARGET_PCT, SNIPER_HARD_STOP,
+#   SNIPER_TRAIL_ACTIVE, SNIPER_TRAIL_STEP, SNIPER_ENTRY_ENABLED,
+#   SNIPER_ENTRY_START, SNIPER_ENTRY_END
 
 on:
   schedule:
-    - cron: "*/5 13-20 * * 1-5"   # every 5 min during market hours
-  workflow_dispatch:               # manual "Run workflow" button
+    - cron: "*/5 13-20 * * 1-5"
+  workflow_dispatch:
 
-# Never let two runs trade at once.
 concurrency:
   group: robinhood-sniper
   cancel-in-progress: false
@@ -37,11 +44,68 @@ jobs:
       - name: Install deps
         run: pip install requests pytz yfinance
 
+      - name: Refresh token
+        id: refresh
+        env:
+          MCP_REFRESH_TOKEN: ${{ secrets.MCP_REFRESH_TOKEN }}
+          MCP_CLIENT_ID:     "LtLiNmbs9owbYfWgBlC68Z2V-claude"
+        run: |
+          # Run token_manager to get fresh tokens
+          OUTPUT=$(python token_manager.py 2>/tmp/refresh.log)
+          cat /tmp/refresh.log
+          echo "$OUTPUT"
+          NEW_ACCESS=$(echo "$OUTPUT" | grep '^NEW_ACCESS_TOKEN=' | cut -d= -f2-)
+          NEW_REFRESH=$(echo "$OUTPUT" | grep '^NEW_REFRESH_TOKEN=' | cut -d= -f2-)
+          if [ -z "$NEW_ACCESS" ]; then
+            echo "Token refresh failed — falling back to stored access token"
+            echo "access_token=${{ secrets.MCP_BEARER_TOKEN }}" >> $GITHUB_OUTPUT
+          else
+            echo "access_token=$NEW_ACCESS"     >> $GITHUB_OUTPUT
+            echo "refresh_token=$NEW_REFRESH"   >> $GITHUB_OUTPUT
+          fi
+
+      - name: Rotate secrets
+        if: steps.refresh.outputs.refresh_token != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          REPO:     ${{ github.repository }}
+        run: |
+          # Helper: update a GitHub secret via REST API
+          update_secret() {
+            local name=$1 value=$2
+            # Get repo public key for secret encryption
+            KEY_DATA=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$REPO/actions/secrets/public-key")
+            KEY_ID=$(echo "$KEY_DATA" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['key_id'])")
+            KEY=$(echo "$KEY_DATA"    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['key'])")
+            # Encrypt the secret value using libsodium via Python
+            ENCRYPTED=$(python3 - << PYEOF
+          import base64, sys
+          from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+          from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+          # Use PyNaCl for sealed box encryption
+          import nacl.encoding, nacl.public
+          pk = nacl.public.PublicKey(base64.b64decode("$KEY"))
+          box = nacl.public.SealedBox(pk)
+          enc = box.encrypt("$value".encode())
+          print(base64.b64encode(enc).decode())
+          PYEOF
+            )
+            curl -s -X PUT \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Content-Type: application/json" \
+              "https://api.github.com/repos/$REPO/actions/secrets/$name" \
+              -d "{\"encrypted_value\":\"$ENCRYPTED\",\"key_id\":\"$KEY_ID\"}"
+          }
+          pip install PyNaCl -q
+          update_secret MCP_BEARER_TOKEN  "${{ steps.refresh.outputs.access_token }}"
+          update_secret MCP_REFRESH_TOKEN "${{ steps.refresh.outputs.refresh_token }}"
+          echo "Secrets rotated."
+
       - name: Run sniper
         env:
-          MCP_BEARER_TOKEN:       ${{ secrets.MCP_BEARER_TOKEN }}
+          MCP_BEARER_TOKEN:       ${{ steps.refresh.outputs.access_token }}
           AGENTIC_ACCOUNT:        ${{ secrets.AGENTIC_ACCOUNT }}
-          # Strategy knobs (override via repo Variables; safe defaults here)
           SNIPER_SYMBOL:          ${{ vars.SNIPER_SYMBOL || 'APLD' }}
           SNIPER_CAPITAL:         ${{ vars.SNIPER_CAPITAL || '5.00' }}
           SNIPER_TARGET_PCT:      ${{ vars.SNIPER_TARGET_PCT || '0.25' }}
